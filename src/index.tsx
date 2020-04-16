@@ -17,6 +17,8 @@ import {
   KeyboardAvoidingViewProps,
   ViewStyle,
   KeyboardEvent,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import {
   PanGestureHandler,
@@ -78,6 +80,12 @@ export class Modalize<FlatListItem = any, SectionListItem = any> extends React.C
     threshold: 120,
     velocity: 2800,
   };
+
+  private scrollYReachedTop: boolean = false;
+  private idle: boolean = false;
+
+  private scrollInProgress: boolean = false;
+  private toto: Animated.Value = new Animated.Value(1);
 
   private snaps: number[] = [];
   private snapEnd: number;
@@ -248,12 +256,18 @@ export class Modalize<FlatListItem = any, SectionListItem = any> extends React.C
     const diffClamp = Animated.diffClamp(this.reverseBeginScrollY, -screenHeight, 0);
     const valueY = Animated.add(this.dragY, diffClamp);
 
+    const res = Animated.multiply(valueY, this.toto);
+    console.log('-res', res);
+    const value = Animated.add(this.translateY, res); // this.translateY need to be 0
+    console.log('-value', value);
+
     return {
       height: modalHeight,
       maxHeight: this.initialComputedModalHeight,
       transform: [
         {
-          translateY: Animated.add(this.translateY, valueY).interpolate({
+          translateY: Animated.add(this.translateY, res).interpolate({
+          // translateY: value.interpolate({
             inputRange: [-40, 0, this.snapEnd],
             outputRange: [0, 0, this.snapEnd],
             extrapolate: 'clamp',
@@ -496,6 +510,13 @@ export class Modalize<FlatListItem = any, SectionListItem = any> extends React.C
       ? (this.beginScrollYValue <= 20 && velocityY >= velocity) || thresholdProps
       : thresholdProps;
 
+    console.log('\n');
+    console.log('-scrollYReachedTop', this.scrollYReachedTop);
+    console.log('-this.beginScrollYValue', this.beginScrollYValue);
+    console.log('-translationY', translationY);
+    // console.log('-this.idle', this.idle);
+    console.log('-scrollYOYO', this.scrollYOYO);
+
     this.setState({ enableBounces });
 
     if (nativeEvent.oldState === State.ACTIVE) {
@@ -527,14 +548,20 @@ export class Modalize<FlatListItem = any, SectionListItem = any> extends React.C
         this.close();
       }
 
-      if (this.willCloseModalize) {
+      if (this.willCloseModalize /*|| this.scrollInProgress*/) {
         return;
       }
 
       this.setState({ lastSnap: destSnapPoint });
-      this.translateY.extractOffset();
-      this.translateY.setValue(toValue);
-      this.translateY.flattenOffset();
+
+      if (!this.scrollYReachedTop) {
+        // this.translateY.extractOffset();
+        this.translateY.setValue(toValue);
+        // this.translateY.flattenOffset();
+      } else {
+        this.translateY.setValue(0);
+      }
+
       this.dragY.setValue(0);
 
       if (alwaysOpen) {
@@ -714,10 +741,28 @@ export class Modalize<FlatListItem = any, SectionListItem = any> extends React.C
     const opts = {
       ref: this.contentView,
       bounces: enableBounces,
+      onScroll: ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+        this.scrollInProgress = true;
+        this.toto.setValue(0);
+        console.log('-event', nativeEvent.contentOffset.y);
+        this.scrollYReachedTop = nativeEvent.contentOffset.y <= 0;
+        this.scrollYOYO = nativeEvent.contentOffset.y;
+        this.idle = false;
+      },
       onScrollBeginDrag: Animated.event(
         [{ nativeEvent: { contentOffset: { y: this.beginScrollY } } }],
         { useNativeDriver: USE_NATIVE_DRIVER },
       ),
+      onScrollEndDrag: ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+        console.log('-coucou');
+        this.scrollInProgress = false;
+        this.toto.setValue(1);
+      },
+      onMomentumScrollEnd: ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+        console.log('-end');
+        this.scrollYOYO = 0;
+        this.idle = true;
+      },
       scrollEventThrottle: 16,
       onLayout: this.onContentViewLayout,
       scrollEnabled: keyboardToggle || !disableScroll,
